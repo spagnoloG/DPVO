@@ -65,6 +65,14 @@ CAM_LINES = np.array(
 CAM_SCALE = 0.05
 
 
+def pose_to_matrix(translation, quat):
+    # quat is [qw, qx, qy, qz]
+    q = [quat[1], quat[2], quat[3], quat[0]]  # converts to [qx, qy, qz, qw]
+    T = tft.quaternion_matrix(q)  # returns a 4x4 matrix
+    T[0:3, 3] = translation
+    return T
+
+
 def transform_camera_points(translation, quaternion, scale=CAM_SCALE):
     """
     Transforms the fixed camera model points using the provided translation and quaternion.
@@ -324,12 +332,12 @@ def run(
 
         # Extract current pose from slam.pg.poses_
         if slam.n > 0:
-            current_pose_tensor = slam.pg.poses_[slam.n - 1]
             current_pose_array = (
-                current_pose_tensor.detach().cpu().numpy()
-            )  # [x,y,z, qx,qy,qz,qw]
+                slam.pg.poses_[slam.n - 1].detach().cpu().numpy()
+            )  # [x, y, z, qx, qy, qz, qw]
+            # Extract the translation and quaternion from the raw pose.
             translation = current_pose_array[:3]
-            # Reorder quaternion from [qx,qy,qz,qw] to [qw,qx,qy,qz] for trajectory.
+            # Reorder quaternion from [qx, qy, qz, qw] to [qw, qx, qy, qz]
             quat = np.array(
                 [
                     current_pose_array[6],
@@ -338,7 +346,14 @@ def run(
                     current_pose_array[5],
                 ]
             )
-            trajectory_positions.append(translation)
+            # Compute the transformation matrix (raw: world-to-camera)
+            T = pose_to_matrix(translation, quat)
+            # Invert T to get camera-to-world (i.e. the true camera center)
+            T_inv = np.linalg.inv(T)
+            # Extract the camera center from the inverted matrix.
+            center = T_inv[0:3, 3]
+            # Append the inverted translation to the trajectory.
+            trajectory_positions.append(center)
             trajectory_orientations.append(quat)
             trajectory_tstamps.append(t)
         else:
